@@ -1,0 +1,45 @@
+.header {
+  height: 50px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-logo {
+  color: var(--accent-secondary);
+  display: flex;
+  align-items: center;
+}
+
+.app-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  height: 32px;
+}
+
+.theme-toggle {
+  font-size: 16px;
+  padding: 4px 10px;
+}

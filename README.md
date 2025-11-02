@@ -1,0 +1,219 @@
+# SnapSetup
+
+A powerful desktop application built with Electron, React, and Node.js that automates JavaScript codebase setup with AI-powered assistance.
+
+## Features
+
+### 🚀 Automated Setup
+- **Project Analysis**: Automatically detects project type (React, Next.js, Express, etc.)
+- **Dependency Installation**: Sequential installation with progress tracking and per-package status
+- **Real-time Terminal**: VS Code-style terminal with streaming output
+- **Auto-retry Logic**: Automatically retries failed installations with exponential backoff
+
+### 🤖 AI Agent
+- **Conversational Interface**: Chat with the AI agent about your setup
+- **Action Panel**: Quick access to common actions and setup status
+- **Smart Detection**: Detects missing requirements (Node.js, Docker, .env files)
+- **Guided Setup**: Step-by-step guidance through the setup process
+
+### 🔧 System Checks
+- Node.js and npm version detection
+- Docker and Docker Compose availability
+- Environment file handling (.env generation from .env.example)
+- Port conflict detection
+
+### 📁 File Management
+- **Project Explorer**: Browse uploaded project files
+- **File Watcher**: Automatically detects external file changes
+- **Quick Actions**: Open project in VS Code, Cursor, or file explorer
+
+### 🐳 Docker Support
+- Detect existing docker-compose.yml
+- Auto-generate docker-compose.yml based on project dependencies
+- Run containers with streaming logs
+- Support for MongoDB, PostgreSQL, MySQL
+
+### 📊 Database & Logs
+- **Logs Viewer**: Complete setup logs with timestamps and types
+- **Database Viewer**: Connect and view database contents
+- **Export Options**: Export logs as JSON, CSV, or text
+
+### 🎨 VS Code-like UI
+- Dark theme optimized for developers
+- Resizable panels
+- Collapsible sections
+- Toast notifications
+- Status bar with project info
+
+## Installation
+
+```bash
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run dev
+
+# Build for production
+npm run build
+npm run build:electron
+```
+
+## Usage
+
+### 1. Upload Project
+- Click "Upload Project" in the header
+- Select your JavaScript project folder
+- The app will analyze the project and display detected information
+
+### 2. Review Analysis
+The sidebar shows:
+- Project type (frontend, backend, fullstack)
+- Technology stack
+- Detected ports
+- Docker Compose availability
+- Environment file status
+
+### 3. Start Auto Setup
+- Click "Start Auto Setup" in the AI Agent panel
+- The app will:
+  - Check Node.js and npm
+  - Check/create .env file
+  - Install dependencies with progress tracking
+  - Start development servers
+
+### 4. Monitor Progress
+- **Terminal Panel**: See real-time command output
+- **AI Agent Panel**: View progress percentage and per-package status
+- **Footer**: Check server URLs and system status
+
+### 5. Docker Compose (Optional)
+- If docker-compose.yml doesn't exist, click "Generate docker-compose.yml"
+- Review the generated file
+- Approve and save
+- The app will run `docker-compose up` automatically
+
+## Architecture
+
+### Electron Main Process (`electron/main.js`)
+- File system operations
+- Process spawning and management
+- File watching with chokidar
+- IPC communication
+
+### React Renderer (`src/`)
+- **App.jsx**: Main application component
+- **ProjectContext.jsx**: Global state management
+- **Components**:
+  - Header: Navigation and actions
+  - Sidebar: Project explorer and info
+  - Terminal: Real-time command output
+  - AIAgent: Conversational AI and actions
+  - DatabaseViewer: Logs and database viewer
+  - Footer: Status bar
+  - Toast: Notifications
+
+### Setup Manager (`src/utils/SetupManager.js`)
+- System checks
+- Dependency installation
+- Docker Compose generation
+- Environment file handling
+- Retry logic
+
+## Security
+
+- **No Automatic Secrets Upload**: .env files are never uploaded externally
+- **Local Execution**: All commands run locally on your machine
+- **Placeholder Generation**: Auto-generated .env files use placeholders
+- **User Confirmation**: Docker Compose generation requires approval
+
+### Google AI Studio / Generative API (safe integration)
+
+This project includes a small local proxy you can run to safely call Google AI Studio or other Google Generative APIs without embedding your API key in the renderer (frontend).
+
+Quick steps:
+
+1. Create a local `.env` (copy from `.env.example`) and set `GOOGLE_AI_API_KEY` and `GOOGLE_AI_ENDPOINT`.
+2. Install dependencies: `npm install` (this will install `express` and `dotenv` used by the proxy).
+3. Start the proxy: `npm run start-proxy` (or `node src/googleAIProxy.js`). The proxy listens on port 3000 by default.
+4. In development, the renderer (`AIAgent`) sends requests to `http://localhost:3000/ai` which the proxy forwards to the configured endpoint.
+
+Security notes:
+- Never paste or commit your API key into the code or any public place. If you accidentally shared a key, rotate/revoke it immediately in Google Cloud Console.
+- The proxy reads the key from environment variables only. Keep the `.env` file local and out of source control.
+- If you prefer a different deployment model, run the proxy on a secure server and protect it with authentication.
+
+
+## Requirements
+
+- **Node.js**: v16 or higher
+- **npm**: v8 or higher
+- **Operating System**: Windows, macOS, or Linux
+- **Optional**: Docker Desktop (for Docker Compose features)
+
+## Development
+
+### Project Structure
+```
+ai-codebase-setup/
+├── electron/           # Electron main process
+│   ├── main.js        # Main process entry
+│   └── preload.js     # Preload script
+├── src/               # React renderer
+│   ├── components/    # UI components
+│   ├── context/       # State management
+│   ├── utils/         # Utilities
+│   ├── App.jsx        # Root component
+│   └── main.jsx       # Entry point
+├── package.json       # Dependencies
+├── vite.config.js     # Vite configuration
+└── index.html         # HTML template
+```
+
+### Adding New Features
+
+1. **New UI Component**: Add to `src/components/`
+2. **New Utility**: Add to `src/utils/`
+3. **IPC Handler**: Add to `electron/main.js` and `electron/preload.js`
+4. **State Management**: Update `src/context/ProjectContext.jsx`
+
+## Troubleshooting
+
+### Node.js Not Detected
+- Install Node.js from https://nodejs.org/
+- Restart the application
+- Click "Start Auto Setup" again
+
+### Docker Not Available
+- Install Docker Desktop
+- Ensure Docker is running
+- Restart the application
+
+### Port Conflicts
+- Check the terminal for EADDRINUSE errors
+- Kill processes using the conflicting ports
+- Try again
+
+### Installation Failures
+- Check your internet connection
+- Review terminal logs for specific errors
+- Click "Retry Failed" to retry failed packages
+- Some packages (like bcrypt) may require build tools
+
+## Future Enhancements
+
+- [ ] Local LLM integration for AI agent
+- [ ] Database schema visualization
+- [ ] Git integration
+- [ ] Code generation capabilities
+- [ ] Multi-project support
+- [ ] Custom setup templates
+- [ ] Plugin system
+
+## License
+
+MIT License
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

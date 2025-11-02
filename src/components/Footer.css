@@ -1,0 +1,66 @@
+.footer {
+  height: 28px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.footer-left,
+.footer-center,
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.stop-btn {
+  margin-left: 8px;
+  background: #ef4444;
+  color: white;
+  border: none;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.footer-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer-item.clickable {
+  cursor: pointer;
+}
+
+.footer-item.clickable:hover .link {
+  text-decoration: underline;
+}
+
+.footer-item .label {
+  color: var(--text-secondary);
+}
+
+.footer-item .value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.footer-item .value.error {
+  color: var(--error);
+}
+
+.footer-item .value.running {
+  color: var(--success);
+}
+
+.footer-item .value.available {
+  color: var(--success);
+}
+
+.footer-item .value.link {
+  color: var(--accent-secondary);
+}

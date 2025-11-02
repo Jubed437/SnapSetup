@@ -1,0 +1,25 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
+  writeFile: (filePath, content) => ipcRenderer.invoke('write-file', filePath, content),
+  fileExists: (filePath) => ipcRenderer.invoke('file-exists', filePath),
+  readDirectory: (dirPath) => ipcRenderer.invoke('read-directory', dirPath),
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  openPath: (p) => ipcRenderer.invoke('open-path', p),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  checkCommand: (cmd) => ipcRenderer.invoke('check-command', cmd),
+  runCommand: (command, args, cwd, id) => ipcRenderer.invoke('run-command', command, args, cwd, id),
+  watchFiles: (basePath, patterns) => ipcRenderer.invoke('watch-files', basePath, patterns),
+  stopWatching: (id) => ipcRenderer.invoke('stop-watching', id),
+  getUserDataPath: () => ipcRenderer.invoke('get-user-data-path'),
+  runInTerminal: (command, cwd, shellType) => ipcRenderer.invoke('run-in-terminal', command, cwd, shellType),
+  spawnCommand: (command, args, cwd, id) => ipcRenderer.invoke('spawn-command', command, args, cwd, id),
+  killCommand: (idOrPid) => ipcRenderer.invoke('kill-command', idOrPid),
+  // Event subscriptions
+  onFileChanged: (cb) => ipcRenderer.on('file-changed', (e, data) => cb(data)),
+  onCommandOutput: (cb) => ipcRenderer.on('command-output', (e, data) => cb(data)),
+  onCommandComplete: (cb) => ipcRenderer.on('command-complete', (e, data) => cb(data)),
+  onCommandError: (cb) => ipcRenderer.on('command-error', (e, data) => cb(data)),
+  removeListener: (channel) => ipcRenderer.removeAllListeners(channel),
+});

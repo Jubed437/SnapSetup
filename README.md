@@ -6,15 +6,21 @@ A powerful desktop application built with Electron, React, and Node.js that auto
 
 ### 🚀 Automated Setup
 - **Project Analysis**: Automatically detects project type (React, Next.js, Express, etc.)
+- **Fullstack Support**: One-click setup for fullstack apps (backend + frontend + database)
 - **Dependency Installation**: Sequential installation with progress tracking and per-package status
 - **Real-time Terminal**: VS Code-style terminal with streaming output
 - **Auto-retry Logic**: Automatically retries failed installations with exponential backoff
+- **Smart Sequencing**: Starts database → backend → frontend in the correct order
 
-### 🤖 AI Agent
-- **Conversational Interface**: Chat with the AI agent about your setup
+### 🤖 Hybrid AI Agent
+- **Rule-Based Intelligence**: Instant responses for common queries (no API needed)
+- **Optional Local LLM**: Add Ollama for advanced AI features (free, runs locally)
+- **Conversational Interface**: Chat naturally about your setup
 - **Action Panel**: Quick access to common actions and setup status
 - **Smart Detection**: Detects missing requirements (Node.js, Docker, .env files)
+- **Error Diagnosis**: Automatically identifies and suggests fixes for common errors
 - **Guided Setup**: Step-by-step guidance through the setup process
+- **100% Free**: No API keys or costs required
 
 ### 🔧 System Checks
 - Node.js and npm version detection
@@ -29,9 +35,11 @@ A powerful desktop application built with Electron, React, and Node.js that auto
 
 ### 🐳 Docker Support
 - Detect existing docker-compose.yml
-- Auto-generate docker-compose.yml based on project dependencies
+- Auto-generate docker-compose.yml for fullstack projects
+- Automatic database container startup
 - Run containers with streaming logs
 - Support for MongoDB, PostgreSQL, MySQL
+- Backend and frontend service configuration
 
 ### 📊 Database & Logs
 - **Logs Viewer**: Complete setup logs with timestamps and types
@@ -200,9 +208,27 @@ ai-codebase-setup/
 - Click "Retry Failed" to retry failed packages
 - Some packages (like bcrypt) may require build tools
 
+## AI Agent
+
+The hybrid AI agent combines rule-based intelligence with optional local LLM:
+
+### Rule-Based (Always Active)
+- Instant responses for common queries
+- Pattern matching for intent detection
+- Error diagnosis and fixes
+- No setup required
+
+### Local LLM (Optional)
+- Install Ollama for advanced AI
+- Natural language understanding
+- Complex query handling
+- Completely free and private
+
+See [AI_AGENT_GUIDE.md](AI_AGENT_GUIDE.md) for detailed usage.
+
 ## Future Enhancements
 
-- [ ] Local LLM integration for AI agent
+- [x] Hybrid AI agent with local LLM support
 - [ ] Database schema visualization
 - [ ] Git integration
 - [ ] Code generation capabilities

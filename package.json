@@ -2,36 +2,51 @@
   "name": "snapsetup",
   "version": "1.0.0",
   "description": "AI-powered JavaScript codebase setup automation",
+  "author": "Your Name",
+  "license": "MIT",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "build:electron": "npm run build && electron-builder",
     "start": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "start-proxy": "node src/googleAIProxy.js"
+    "start-proxy": "node src/googleAIProxy.js",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux"
   },
   "build": {
     "appId": "com.snapsetup.app",
     "productName": "SnapSetup",
+    "copyright": "Copyright © 2024",
     "directories": {
-      "output": "dist-electron"
+      "output": "release",
+      "buildResources": "assets"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "assets/**/*"
+      "!node_modules/**/*",
+      "node_modules/chokidar/**/*"
     ],
     "win": {
-      "icon": "assets/icon.ico"
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "mac": {
-      "icon": "assets/icon.icns"
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "icon": "assets/icon.png"
+      "target": ["AppImage", "deb"],
+      "category": "Development"
     }
   },
   "dependencies": {
@@ -47,6 +62,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.1.1",
+    "canvas": "^3.2.0",
     "electron": "^39.2.0",
     "electron-builder": "^26.0.12",
     "vite": "^7.2.2"

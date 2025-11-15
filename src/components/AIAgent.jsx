@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useProject } from '../context/ProjectContext';
 import SetupManager from '../utils/SetupManager';
+import HybridAIAgent from '../utils/HybridAIAgent';
 import './AIAgent.css';
 
 function AIAgent() {
@@ -13,6 +14,7 @@ function AIAgent() {
     installProgress,
     setupStatus,
     systemChecks,
+    runningServers,
     showToast,
     addLog,
     setSystemChecks,
@@ -23,14 +25,25 @@ function AIAgent() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [llmStatus, setLlmStatus] = useState(null);
   const messagesEndRef = useRef(null);
   const setupManager = useRef(null);
+  const hybridAgent = useRef(null);
 
   useEffect(() => {
     if (projectPath && !setupManager.current) {
       setupManager.current = new SetupManager(projectPath, projectContext);
     }
-  }, [projectPath, projectContext]);
+    if (!hybridAgent.current) {
+      // Get Groq API key from environment or settings
+      const groqApiKey = import.meta.env.VITE_GROQ_API_KEY || settings?.groqApiKey || '';
+      hybridAgent.current = new HybridAIAgent(projectContext, groqApiKey);
+      hybridAgent.current.initialize().then(() => {
+        const status = hybridAgent.current.getAIStatus();
+        setLlmStatus(status);
+      });
+    }
+  }, [projectPath, projectContext, settings]);
 
   useEffect(() => {
     scrollToBottom();
@@ -39,11 +52,20 @@ function AIAgent() {
   useEffect(() => {
     // Add initial message when project is loaded
     if (project && analysis && messages.length === 0) {
-      addAgentMessage(
-        `Hey — I analyzed your project. I detected ${analysis.type} with ${analysis.stack.join(', ')}. ` +
-        `I found ${dependencies.length} dependencies. Click "Start Auto Setup" to begin installation.`,
-        'greeting'
-      );
+      let message = `Hey — I analyzed your project. `;
+      
+      if (analysis.type === 'fullstack') {
+        message += `I detected a fullstack application with ${analysis.stack.join(', ')}. `;
+        if (analysis.hasDatabase) {
+          message += `Database detected! I'll auto-generate docker-compose.yml and start everything in the right order. `;
+        }
+        message += `Click "Start Auto Setup" to install and run both backend and frontend.`;
+      } else {
+        message += `I detected ${analysis.type} with ${analysis.stack.join(', ')}. `;
+        message += `I found ${dependencies.length} dependencies. Click "Start Auto Setup" to begin installation.`;
+      }
+      
+      addAgentMessage(message, 'greeting');
     }
   }, [project, analysis]);
 
@@ -68,7 +90,7 @@ function AIAgent() {
     setMessages((prev) => [
       ...prev,
       {
-        id: Date.now(),
+        id: `${Date.now()}-${Math.random()}`,
         sender: 'agent',
         text,
         type,
@@ -81,7 +103,7 @@ function AIAgent() {
     setMessages((prev) => [
       ...prev,
       {
-        id: Date.now(),
+        id: `${Date.now()}-${Math.random()}`,
         sender: 'user',
         text,
         timestamp: new Date().toISOString(),
@@ -98,7 +120,7 @@ function AIAgent() {
     
     try {
       // Run system checks first
-      addAgentMessage('Checking system requirements...', 'info');
+      addAgentMessage('🔍 Checking system requirements...', 'info');
       const sysChecks = await setupManager.current.runSystemChecks();
       setSystemChecks(sysChecks);
       
@@ -116,9 +138,9 @@ function AIAgent() {
       addLog({ type: 'success', message: `Node.js version: ${sysChecks.node}` });
       
       // Check .env
-      addAgentMessage('Checking environment files...', 'info');
+      addAgentMessage('🔐 Checking environment files...', 'info');
       const envCheck = await setupManager.current.checkEnvFile();
-      if (envCheck.created) {
+      if (envCheck && envCheck.created) {
         addAgentMessage(
           '✅ .env file created with placeholders. Please review and update with your actual values.',
           'info'
@@ -126,16 +148,31 @@ function AIAgent() {
         showToast('.env file created with placeholders', 'warning');
       }
       
-      // Start setup
-      addAgentMessage(`Installing ${dependencies.length} dependencies... This may take a few minutes.`, 'info');
-      addLog({ type: 'info', message: `Starting installation of ${dependencies.length} dependencies` });
-      await setupManager.current.runFullSetup();
+      // Show different messages based on project type
+      if (analysis?.type === 'fullstack') {
+        addAgentMessage('🚀 Fullstack project detected! Starting sequential setup...', 'info');
+        addAgentMessage('📦 Step 1: Installing dependencies (check terminal for progress)', 'info');
+        if (analysis.hasDatabase) {
+          addAgentMessage('🐳 Step 2: Starting database containers', 'info');
+        }
+        addAgentMessage('🔧 Step 3: Starting backend server', 'info');
+        addAgentMessage('⚙️ Step 4: Starting frontend dev server', 'info');
+      } else {
+        addAgentMessage(`📦 Installing dependencies... Check the terminal below for real-time progress.`, 'info');
+      }
       
-      addAgentMessage('Setup completed successfully! 🎉', 'success');
+      addLog({ type: 'info', message: 'Starting setup process...' });
+      const setupResult = await setupManager.current.runFullSetup();
+      addLog({ type: 'info', message: `Setup result: ${JSON.stringify(setupResult)}` });
+      
+      addAgentMessage('✅ Setup completed successfully! 🎉', 'success');
+      if (runningServers.frontend || runningServers.backend) {
+        addAgentMessage('Your servers are running! Check the footer for URLs.', 'success');
+      }
       showToast('Setup completed successfully!', 'success');
       addLog({ type: 'success', message: 'Setup completed successfully' });
     } catch (error) {
-      addAgentMessage(`Setup failed: ${error.message}`, 'error');
+      addAgentMessage(`❌ Setup failed: ${error.message}`, 'error');
       addLog({ type: 'error', message: `Setup failed: ${error.message}` });
       showToast(`Setup failed: ${error.message}`, 'error');
     } finally {
@@ -180,31 +217,73 @@ function AIAgent() {
     }
   };
 
-  const handleSendMessage = () => {
-    if (!inputValue.trim()) return;
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || !hybridAgent.current) return;
 
     const messageToSend = inputValue.trim();
     addUserMessage(messageToSend);
     setInputValue('');
     setIsProcessing(true);
 
-    fetch('http://localhost:3000/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: messageToSend }),
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Server returned ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        const replyText = data?.body?.outputText || data?.reply || 'Response received';
-        addAgentMessage(replyText, 'info');
-      })
-      .catch((err) => {
-        addAgentMessage('AI proxy not running. Start it with: npm run start-proxy', 'error');
-      })
-      .finally(() => setIsProcessing(false));
+    try {
+      // Get current context
+      const currentContext = {
+        project,
+        projectPath,
+        analysis,
+        dependencies,
+        setupStatus,
+        logs: projectContext.logs || [],
+        runningServers,
+        systemChecks,
+      };
+
+      // Get response from hybrid agent
+      const response = await hybridAgent.current.chat(messageToSend, currentContext);
+      
+      // Add agent response
+      addAgentMessage(response.message, 'info');
+
+      // Execute actions if any
+      if (response.actions && response.actions.length > 0) {
+        for (const action of response.actions) {
+          await executeAction(action);
+        }
+      }
+    } catch (error) {
+      addAgentMessage(`Error: ${error.message}`, 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const executeAction = async (action) => {
+    try {
+      switch (action.type) {
+        case 'start_setup':
+          await handleStartSetup();
+          break;
+        case 'retry':
+          await handleRetry();
+          break;
+        case 'generate_docker':
+          await handleGenerateDockerCompose();
+          break;
+        case 'create_env':
+          if (setupManager.current) {
+            await setupManager.current.checkEnvFile();
+            addAgentMessage('.env file created successfully', 'success');
+          }
+          break;
+        case 'suggestion':
+          addAgentMessage(`💡 Suggestion: ${action.text}`, 'info');
+          break;
+        default:
+          console.log('Unknown action:', action);
+      }
+    } catch (error) {
+      addAgentMessage(`Failed to execute action: ${error.message}`, 'error');
+    }
   };
 
   const renderActions = () => {
@@ -223,9 +302,19 @@ function AIAgent() {
           <div className="status-item">
             <span className="status-label">Status:</span>
             <span className={`status-badge ${setupStatus}`}>
+              {setupStatus === 'installing' && '⌛ '}
+              {setupStatus === 'running' && '✅ '}
+              {setupStatus === 'completed' && '🎉 '}
+              {setupStatus === 'error' && '❌ '}
               {setupStatus}
             </span>
           </div>
+          {setupStatus === 'installing' && (
+            <div className="activity-indicator">
+              <div className="spinner"></div>
+              <span>Installing dependencies... Check terminal for progress</span>
+            </div>
+          )}
           {installProgress.total > 0 && (
             <div className="progress-container">
               <div className="progress-bar">
@@ -281,6 +370,24 @@ function AIAgent() {
             </button>
           )}
         </div>
+
+        {llmStatus && (
+          <div className="action-section">
+            <h4>AI Status</h4>
+            <div className="status-item">
+              <span className="status-label">{llmStatus.provider} AI:</span>
+              <span className={`status-badge ${llmStatus.available ? 'running' : 'idle'}`}>
+                {llmStatus.available ? '✅ Active' : '⚪ Not Configured'}
+              </span>
+            </div>
+            {llmStatus.available && (
+              <div className="status-item">
+                <span className="status-label">Model:</span>
+                <span className="status-value">{llmStatus.model}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {dependencies.length > 0 && (
           <div className="action-section">

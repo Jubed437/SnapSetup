@@ -14,6 +14,8 @@ function createWindow() {
     height: 800,
     frame: false,
     titleBarStyle: 'hidden',
+    show: false,
+    backgroundColor: '#1e1e1e',
     icon: path.join(__dirname, '..', 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -28,6 +30,11 @@ function createWindow() {
   mainWindow.loadURL(devUrl).catch(() => {
     const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
     mainWindow.loadFile(indexPath);
+  });
+
+  // Show window when ready to prevent flashing
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
   });
 
   mainWindow.on('closed', () => {
@@ -180,7 +187,21 @@ ipcMain.handle('run-command', (event, command, args = [], cwd = process.cwd(), i
 // Spawn a long-running command and return immediately with pid and id
 ipcMain.handle('spawn-command', (event, command, args = [], cwd = process.cwd(), id = null) => {
   try {
-    const child = spawn(command, args, { cwd, shell: true, detached: true });
+    const spawnOptions = { 
+      cwd, 
+      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, FORCE_COLOR: '0', CI: 'true' }
+    };
+    
+    // On Windows, prevent console window from appearing
+    if (process.platform === 'win32') {
+      spawnOptions.windowsHide = true;
+      spawnOptions.windowsVerbatimArguments = false;
+      spawnOptions.detached = false;
+    }
+    
+    const child = spawn(command, args, spawnOptions);
     const cmdId = id || `${Date.now()}`;
     runningCommands.set(cmdId, child);
 
@@ -208,7 +229,18 @@ ipcMain.handle('kill-command', (event, idOrPid) => {
     // try by id
     if (runningCommands.has(idOrPid)) {
       const child = runningCommands.get(idOrPid);
-      child.kill();
+      
+      // On Windows, kill the entire process tree
+      if (process.platform === 'win32') {
+        try {
+          spawn('taskkill', ['/pid', child.pid, '/T', '/F'], { shell: true });
+        } catch (e) {
+          child.kill('SIGKILL');
+        }
+      } else {
+        child.kill('SIGKILL');
+      }
+      
       runningCommands.delete(idOrPid);
       return { success: true };
     }
@@ -216,12 +248,33 @@ ipcMain.handle('kill-command', (event, idOrPid) => {
     // try by pid
     for (const [key, child] of runningCommands.entries()) {
       if (child.pid === Number(idOrPid)) {
-        child.kill();
+        if (process.platform === 'win32') {
+          try {
+            spawn('taskkill', ['/pid', child.pid, '/T', '/F'], { shell: true });
+          } catch (e) {
+            child.kill('SIGKILL');
+          }
+        } else {
+          child.kill('SIGKILL');
+        }
         runningCommands.delete(key);
         return { success: true };
       }
     }
 
+    // Fallback: try to kill by port if we know it
+    if (process.platform === 'win32') {
+      // Try to find and kill process on common dev ports
+      const ports = [5173, 5174, 3000, 3001, 5000, 8080];
+      for (const port of ports) {
+        try {
+          spawn('npx', ['kill-port', port], { shell: true });
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+    
     return { success: false, error: 'Process not found' };
   } catch (err) {
     return { success: false, error: err.message };
@@ -319,6 +372,47 @@ ipcMain.handle('close-window', () => {
     return { success: true };
   }
   return { success: false };
+});
+
+// Detect installed code editors
+ipcMain.handle('detect-editors', () => {
+  const editors = [];
+  const platform = process.platform;
+
+  const editorCommands = {
+    'vscode': { cmd: 'code', name: 'VS Code', icon: 'vscode' },
+    'cursor': { cmd: 'cursor', name: 'Cursor', icon: 'cursor' },
+    'sublime': { cmd: 'subl', name: 'Sublime Text', icon: 'sublime' },
+    'atom': { cmd: 'atom', name: 'Atom', icon: 'atom' },
+    'webstorm': { cmd: 'webstorm', name: 'WebStorm', icon: 'webstorm' },
+  };
+
+  for (const [key, editor] of Object.entries(editorCommands)) {
+    const whichCmd = platform === 'win32' ? 'where' : 'which';
+    const res = spawnSync(whichCmd, [editor.cmd], { encoding: 'utf8' });
+    if (res.status === 0) {
+      editors.push({ id: key, ...editor, available: true });
+    }
+  }
+
+  return editors;
+});
+
+// Open project in code editor
+ipcMain.handle('open-in-editor', (event, editorCmd, projectPath) => {
+  try {
+    // Wrap path in quotes to handle spaces
+    const quotedPath = `"${projectPath}"`;
+    const child = spawn(editorCmd, [quotedPath], { 
+      detached: true, 
+      stdio: 'ignore',
+      shell: true
+    });
+    child.unref();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 // Run a command in a new system terminal window

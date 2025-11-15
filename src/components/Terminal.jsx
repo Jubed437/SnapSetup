@@ -3,12 +3,14 @@ import { useProject } from '../context/ProjectContext';
 import './Terminal.css';
 
 function Terminal() {
-  const { projectPath, loadProject } = useProject();
+  const projectContext = useProject();
+  const { projectPath, loadProject } = projectContext;
   const terminalRef = useRef(null);
   const inputRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [activeTerminal, setActiveTerminal] = useState('main');
   const [terminals, setTerminals] = useState([
+    
     { id: 'main', name: 'PowerShell', type: 'powershell', output: [], history: [], currentDir: '', inputValue: '', historyIndex: -1 },
     { id: 'node', name: 'Node.js', type: 'node', output: [], history: [], currentDir: '', inputValue: '', historyIndex: -1 },
     { id: 'git', name: 'Git', type: 'git', output: [], history: [], currentDir: '', inputValue: '', historyIndex: -1 }
@@ -34,7 +36,7 @@ function Terminal() {
 
   const addOutput = (terminalId, output) => {
     setTerminals(prev => prev.map(t => 
-      t.id === terminalId ? { ...t, output: [...t.output, { id: `${Date.now()}-${Math.random()}`, ...output }] } : t
+      t.id === terminalId ? { ...t, output: [...t.output, { id: crypto.randomUUID(), ...output }] } : t
     ));
   };
   
@@ -100,6 +102,32 @@ function Terminal() {
     return 'stdout';
   };
 
+  const makeLinksClickable = (text) => {
+    if (!text) return '';
+    
+    // Strip ANSI color codes
+    const stripped = text.replace(/\x1b\[[0-9;]*m/g, '');
+    
+    // Escape HTML
+    const escaped = stripped.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    
+    // Make URLs clickable - store URL in data attribute
+    return escaped.replace(
+      /(https?:\/\/localhost:\d+\/?)|(http:\/\/localhost:\d+\/?)|(https?:\/\/[^\s]+)/g,
+      (url) => `<a href="#" data-url="${url}" class="terminal-link" style="color: #4FC3F7; text-decoration: underline; cursor: pointer;">${url}</a>`
+    );
+  };
+  
+  const handleLinkClick = (e) => {
+    if (e.target.classList.contains('terminal-link')) {
+      e.preventDefault();
+      const url = e.target.getAttribute('data-url');
+      if (url && window.electronAPI) {
+        window.electronAPI.openExternal(url);
+      }
+    }
+  };
+
   const createNewTerminal = async () => {
     const newId = `terminal-${Date.now()}`;
     const homeDir = window.electronAPI ? await window.electronAPI.getHomeDir() : '';
@@ -127,6 +155,30 @@ function Terminal() {
   };
 
   const handleKeyDown = (e) => {
+    // Ctrl+C to kill running process
+    if (e.ctrlKey && e.key === 'c') {
+      e.preventDefault();
+      if (window.electronAPI && projectContext.runningProcessId) {
+        addOutput(activeTerminal, { type: 'info', text: '^C\nTerminating process...\n' });
+        window.electronAPI.killCommand(projectContext.runningProcessId).then((result) => {
+          if (result.success) {
+            addOutput(activeTerminal, { type: 'info', text: 'Process terminated successfully\n' });
+          } else {
+            addOutput(activeTerminal, { type: 'error', text: `Failed to terminate: ${result.error}\n` });
+          }
+        });
+        if (projectContext.setRunningProcessId) {
+          projectContext.setRunningProcessId(null);
+        }
+        if (projectContext.setSetupStatus) {
+          projectContext.setSetupStatus('idle');
+        }
+      } else {
+        addOutput(activeTerminal, { type: 'info', text: '^C\n' });
+      }
+      return;
+    }
+    
     if (e.key === 'Enter') {
       e.preventDefault();
       executeCommand(activeTerminalData.inputValue);
@@ -285,13 +337,16 @@ function Terminal() {
         </div>
       </div>
       
-      <div className="terminal-content" ref={terminalRef} onScroll={handleScroll} onClick={() => inputRef.current?.focus()}>
+      <div className="terminal-content" ref={terminalRef} onScroll={handleScroll} onClick={(e) => { handleLinkClick(e); inputRef.current?.focus(); }}>
         <div className="terminal-lines">
-          {activeTerminalData.output.map((output, index) => (
-            <div key={output.id || index} className={`terminal-line ${getLineClass(output.type)}`}>
-              <span className="output-text">{output.text}</span>
-            </div>
-          ))}
+          {activeTerminalData.output.map((output, index) => {
+            const htmlContent = makeLinksClickable(output.text || '');
+            return (
+              <div key={output.id || index} className={`terminal-line ${getLineClass(output.type)}`}>
+                <span className="output-text" dangerouslySetInnerHTML={{ __html: htmlContent }} />
+              </div>
+            );
+          })}
         </div>
         <div className="terminal-input-line">
           <span className="prompt-text">PS {activeTerminalData.currentDir}&gt;</span>

@@ -170,25 +170,57 @@ export function ProjectProvider({ children }) {
       hasEnv: false,
       scripts: packageJson.scripts || {},
       nodeVersion: packageJson.engines?.node || null,
+      isMonorepo: false,
+      hasBackend: false,
+      hasFrontend: false,
+      hasDatabase: false,
     };
 
     // Detect project type
     const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
     
+    // Frontend frameworks
     if (deps.react || deps['react-dom']) analysis.stack.push('React');
     if (deps.next) analysis.stack.push('Next.js');
     if (deps.vite) analysis.stack.push('Vite');
+    if (deps.vue) analysis.stack.push('Vue');
+    
+    // Backend frameworks
     if (deps.express) analysis.stack.push('Express');
+    if (deps.fastify) analysis.stack.push('Fastify');
+    if (deps['@nestjs/core']) analysis.stack.push('NestJS');
+    if (deps.koa) analysis.stack.push('Koa');
+    
+    // Databases
     if (deps.mongodb || deps.mongoose) analysis.stack.push('MongoDB');
     if (deps.pg) analysis.stack.push('PostgreSQL');
     if (deps.mysql || deps.mysql2) analysis.stack.push('MySQL');
     
+    // Detect backend
+    analysis.hasBackend = analysis.stack.some(s => ['Express', 'Fastify', 'NestJS', 'Koa'].includes(s));
+    
+    // Detect frontend
+    analysis.hasFrontend = analysis.stack.some(s => ['React', 'Next.js', 'Vite', 'Vue'].includes(s));
+    
+    // Detect database
+    analysis.hasDatabase = analysis.stack.some(s => ['MongoDB', 'PostgreSQL', 'MySQL'].includes(s));
+    
     // Detect type
-    if (analysis.stack.includes('Express')) {
-      analysis.type = analysis.stack.some(s => ['React', 'Next.js', 'Vite'].includes(s)) ? 'fullstack' : 'backend';
-    } else if (analysis.stack.some(s => ['React', 'Next.js', 'Vite'].includes(s))) {
+    if (analysis.hasBackend && analysis.hasFrontend) {
+      analysis.type = 'fullstack';
+    } else if (analysis.hasBackend) {
+      analysis.type = 'backend';
+    } else if (analysis.hasFrontend) {
       analysis.type = 'frontend';
     }
+
+    // Check for monorepo structure
+    const clientExists = await window.electronAPI.fileExists(`${path}/client/package.json`);
+    const serverExists = await window.electronAPI.fileExists(`${path}/server/package.json`);
+    const frontendExists = await window.electronAPI.fileExists(`${path}/frontend/package.json`);
+    const backendExists = await window.electronAPI.fileExists(`${path}/backend/package.json`);
+    
+    analysis.isMonorepo = clientExists || serverExists || frontendExists || backendExists;
 
     // Check for files
     const dockerComposeExists = await window.electronAPI.fileExists(`${path}/docker-compose.yml`);
@@ -202,7 +234,10 @@ export function ProjectProvider({ children }) {
     // Detect ports (common defaults)
     if (analysis.stack.includes('Next.js')) analysis.ports.push(3000);
     if (analysis.stack.includes('Vite')) analysis.ports.push(5173);
-    if (analysis.stack.includes('Express')) analysis.ports.push(5000);
+    if (analysis.stack.includes('Express') || analysis.hasBackend) analysis.ports.push(5000);
+    if (analysis.stack.includes('React') && !analysis.stack.includes('Next.js') && !analysis.stack.includes('Vite')) {
+      analysis.ports.push(3000);
+    }
 
     return analysis;
   };

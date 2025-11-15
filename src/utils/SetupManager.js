@@ -6,9 +6,6 @@ class SetupManager {
     this.context = context;
     this.retryCount = 2;
     this.retryDelay = 2000;
-    // detect whether to run commands in system terminal from context settings
-    this.useSystemTerminal = context?.settings?.useSystemTerminal || false;
-    this.shellType = context?.settings?.defaultShell || 'powershell';
   }
 
   // Run full setup process
@@ -21,24 +18,275 @@ class SetupManager {
         throw new Error('Node.js is not installed. Please install Node.js from https://nodejs.org/');
       }
 
-      // Step 2: Check .env
+      // Step 2: Detect project structure
+      const projectStructure = await this.detectProjectStructure();
+      
+      // Step 3: Check .env files
       await this.checkEnvFile();
 
-      // Step 3: Check for Docker Compose
+      // Step 4: Check for Docker Compose or generate if needed
       const hasDockerCompose = await window.electronAPI.fileExists(
         `${this.projectPath}/docker-compose.yml`
       );
 
-      if (hasDockerCompose && systemChecks.docker) {
-        // Run with Docker
+      // If fullstack with database, ensure docker-compose exists
+      if (projectStructure.isFullstack && projectStructure.hasDatabase && !hasDockerCompose) {
+        if (this.context) {
+          this.context.addLog({ type: 'info', message: 'Fullstack project detected with database. Generating docker-compose.yml...' });
+        }
+        const dockerResult = await this.generateDockerCompose();
+        if (dockerResult.success) {
+          await window.electronAPI.writeFile(
+            `${this.projectPath}/docker-compose.yml`,
+            dockerResult.content
+          );
+          if (this.context) {
+            this.context.addLog({ type: 'success', message: 'docker-compose.yml generated successfully' });
+          }
+        }
+      }
+
+      // Step 5: Run setup based on structure
+      if (projectStructure.isFullstack) {
+        return await this.runFullstackSetup(projectStructure, systemChecks);
+      } else if (hasDockerCompose && systemChecks.docker) {
         return await this.runWithDocker();
       } else {
-        // Run normal setup
         return await this.runNormalSetup();
       }
     } catch (error) {
       console.error('Setup failed:', error);
       throw error;
+    }
+  }
+
+  // Detect project structure (monorepo, fullstack, etc.)
+  async detectProjectStructure() {
+    const structure = {
+      isFullstack: false,
+      isMonorepo: false,
+      hasBackend: false,
+      hasFrontend: false,
+      hasDatabase: false,
+      backendPath: null,
+      frontendPath: null,
+      backendFramework: null,
+      frontendFramework: null,
+      database: null,
+    };
+
+    // Read main package.json
+    const pkgResult = await window.electronAPI.readFile(`${this.projectPath}/package.json`);
+    if (!pkgResult.success) return structure;
+
+    const packageJson = JSON.parse(pkgResult.content);
+    const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+
+    // Detect backend
+    if (deps.express) structure.backendFramework = 'Express';
+    else if (deps.fastify) structure.backendFramework = 'Fastify';
+    else if (deps['@nestjs/core']) structure.backendFramework = 'NestJS';
+    else if (deps.koa) structure.backendFramework = 'Koa';
+
+    // Detect frontend
+    if (deps.next) structure.frontendFramework = 'Next.js';
+    else if (deps.react || deps['react-dom']) structure.frontendFramework = 'React';
+    else if (deps.vue) structure.frontendFramework = 'Vue';
+    else if (deps.vite) structure.frontendFramework = 'Vite';
+
+    // Detect database
+    if (deps.mongodb || deps.mongoose) structure.database = 'MongoDB';
+    else if (deps.pg) structure.database = 'PostgreSQL';
+    else if (deps.mysql || deps.mysql2) structure.database = 'MySQL';
+
+    structure.hasBackend = !!structure.backendFramework;
+    structure.hasFrontend = !!structure.frontendFramework;
+    structure.hasDatabase = !!structure.database;
+    structure.isFullstack = structure.hasBackend && structure.hasFrontend;
+
+    // Check for monorepo structure
+    const clientExists = await window.electronAPI.fileExists(`${this.projectPath}/client/package.json`);
+    const serverExists = await window.electronAPI.fileExists(`${this.projectPath}/server/package.json`);
+    const frontendExists = await window.electronAPI.fileExists(`${this.projectPath}/frontend/package.json`);
+    const backendExists = await window.electronAPI.fileExists(`${this.projectPath}/backend/package.json`);
+
+    if (clientExists || frontendExists) {
+      structure.isMonorepo = true;
+      structure.frontendPath = clientExists ? `${this.projectPath}/client` : `${this.projectPath}/frontend`;
+    }
+
+    if (serverExists || backendExists) {
+      structure.isMonorepo = true;
+      structure.backendPath = serverExists ? `${this.projectPath}/server` : `${this.projectPath}/backend`;
+    }
+
+    // If not monorepo but fullstack, both are in root
+    if (structure.isFullstack && !structure.isMonorepo) {
+      structure.backendPath = this.projectPath;
+      structure.frontendPath = this.projectPath;
+    }
+
+    return structure;
+  }
+
+  // Run fullstack setup
+  async runFullstackSetup(structure, systemChecks) {
+    if (this.context) {
+      this.context.addLog({ type: 'info', message: 'Fullstack project detected. Starting sequential setup...' });
+      this.context.setSetupStatus('installing');
+    }
+
+    // Step 1: Start database if needed
+    if (structure.hasDatabase && systemChecks.docker) {
+      if (this.context) {
+        this.context.addLog({ type: 'info', message: `Starting ${structure.database} via Docker...` });
+      }
+      await this.startDatabase();
+    }
+
+    // Step 2: Install and start backend
+    if (structure.hasBackend) {
+      if (this.context) {
+        this.context.addLog({ type: 'info', message: `Installing backend (${structure.backendFramework})...` });
+      }
+      await this.setupBackend(structure.backendPath || this.projectPath);
+    }
+
+    // Step 3: Install and start frontend
+    if (structure.hasFrontend) {
+      if (this.context) {
+        this.context.addLog({ type: 'info', message: `Installing frontend (${structure.frontendFramework})...` });
+      }
+      await this.setupFrontend(structure.frontendPath || this.projectPath);
+    }
+
+    if (this.context) {
+      this.context.setSetupStatus('completed');
+      this.context.addLog({ type: 'success', message: 'Fullstack setup completed successfully!' });
+    }
+
+    return { success: true, mode: 'fullstack', structure };
+  }
+
+  // Setup backend
+  async setupBackend(backendPath) {
+    if (this.context) {
+      this.context.addLog({ type: 'info', message: '📦 Installing backend dependencies...' });
+    }
+
+    // Install dependencies
+    const installId = `backend-install-${Date.now()}`;
+    await window.electronAPI.spawnCommand('npm', ['install'], backendPath, installId);
+    
+    // Wait for installation to complete
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    if (this.context) {
+      this.context.addLog({ type: 'success', message: '✅ Backend dependencies installed' });
+    }
+
+    // Start backend server
+    const pkgResult = await window.electronAPI.readFile(`${backendPath}/package.json`);
+    if (pkgResult.success) {
+      const packageJson = JSON.parse(pkgResult.content);
+      const scripts = packageJson.scripts || {};
+      
+      let scriptName = 'dev';
+      if (!scripts.dev && scripts.start) scriptName = 'start';
+      else if (!scripts.dev && scripts['start:dev']) scriptName = 'start:dev';
+      
+      if (scripts[scriptName]) {
+        if (this.context) {
+          this.context.addLog({ type: 'info', message: `🚀 Starting backend server (npm run ${scriptName})...` });
+        }
+        
+        await window.electronAPI.spawnCommand('npm', ['run', scriptName], backendPath, `backend-${Date.now()}`);
+        
+        // Wait for backend to be ready
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        if (this.context) {
+          this.context.setRunningServers(prev => ({ ...prev, backend: 'http://localhost:5000' }));
+          this.context.addLog({ type: 'success', message: '✅ Backend running at http://localhost:5000' });
+        }
+      }
+    }
+  }
+
+  // Setup frontend
+  async setupFrontend(frontendPath) {
+    if (this.context) {
+      this.context.addLog({ type: 'info', message: '📦 Installing frontend dependencies...' });
+    }
+
+    // Install dependencies
+    const installId = `frontend-install-${Date.now()}`;
+    await window.electronAPI.spawnCommand('npm', ['install'], frontendPath, installId);
+    
+    // Wait for installation to complete
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    if (this.context) {
+      this.context.addLog({ type: 'success', message: '✅ Frontend dependencies installed' });
+    }
+
+    // Start frontend server
+    const pkgResult = await window.electronAPI.readFile(`${frontendPath}/package.json`);
+    if (pkgResult.success) {
+      const packageJson = JSON.parse(pkgResult.content);
+      const scripts = packageJson.scripts || {};
+      
+      let scriptName = 'dev';
+      if (!scripts.dev && scripts.start) scriptName = 'start';
+      
+      if (scripts[scriptName]) {
+        if (this.context) {
+          this.context.addLog({ type: 'info', message: `🚀 Starting frontend server (npm run ${scriptName})...` });
+        }
+        
+        await window.electronAPI.spawnCommand('npm', ['run', scriptName], frontendPath, `frontend-${Date.now()}`);
+        
+        // Detect frontend port
+        const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+        let port = 3000;
+        if (deps.vite) port = 5173;
+        else if (deps.next) port = 3000;
+        
+        if (this.context) {
+          this.context.setRunningServers(prev => ({ ...prev, frontend: `http://localhost:${port}` }));
+          this.context.addLog({ type: 'success', message: `✅ Frontend running at http://localhost:${port}` });
+        }
+      }
+    }
+  }
+
+  // Start database via docker-compose
+  async startDatabase() {
+    const hasDockerCompose = await window.electronAPI.fileExists(
+      `${this.projectPath}/docker-compose.yml`
+    );
+
+    if (!hasDockerCompose) return;
+
+    try {
+      // Start only database services
+      await window.electronAPI.spawnCommand(
+        'docker-compose',
+        ['up', '-d'],
+        this.projectPath,
+        `docker-db-${Date.now()}`
+      );
+      
+      // Wait for database to be ready
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      if (this.context) {
+        this.context.addLog({ type: 'success', message: 'Database started successfully' });
+      }
+    } catch (error) {
+      if (this.context) {
+        this.context.addLog({ type: 'warning', message: 'Failed to start database. You may need to start it manually.' });
+      }
     }
   }
 
@@ -50,34 +298,35 @@ class SetupManager {
       docker: null,
     };
 
-    // Check Node
-    const nodeCheck = await window.electronAPI.checkCommand('node');
-    if (nodeCheck.exists) {
-      const nodeVersionResult = await window.electronAPI.runCommand(
-        'node',
-        ['-v'],
-        this.projectPath,
-        'node-version-check'
-      );
-      checks.node = nodeCheck.output.trim();
-    } else {
-      checks.node = false;
-    }
+    try {
+      // Check Node
+      const nodeCheck = await window.electronAPI.checkCommand('node');
+      if (nodeCheck && nodeCheck.exists) {
+        checks.node = nodeCheck.output.trim() || 'installed';
+      } else {
+        checks.node = false;
+      }
 
-    // Check npm
-    const npmCheck = await window.electronAPI.checkCommand('npm');
-    if (npmCheck.exists) {
-      checks.npm = npmCheck.output.trim();
-    } else {
-      checks.npm = false;
-    }
+      // Check npm
+      const npmCheck = await window.electronAPI.checkCommand('npm');
+      if (npmCheck && npmCheck.exists) {
+        checks.npm = npmCheck.output.trim() || 'installed';
+      } else {
+        checks.npm = false;
+      }
 
-    // Check Docker
-    const dockerCheck = await window.electronAPI.checkCommand('docker');
-    if (dockerCheck.exists) {
-      const dockerComposeCheck = await window.electronAPI.checkCommand('docker-compose');
-      checks.docker = dockerCheck.exists || dockerComposeCheck.exists;
-    } else {
+      // Check Docker
+      const dockerCheck = await window.electronAPI.checkCommand('docker');
+      if (dockerCheck && dockerCheck.exists) {
+        checks.docker = true;
+      } else {
+        checks.docker = false;
+      }
+    } catch (error) {
+      console.error('System check error:', error);
+      // Assume Node/npm are available if check fails
+      checks.node = 'unknown';
+      checks.npm = 'unknown';
       checks.docker = false;
     }
 
@@ -141,47 +390,40 @@ class SetupManager {
 
   // Run normal setup (npm install)
   async runNormalSetup() {
+    if (this.context) {
+      this.context.setSetupStatus('installing');
+      this.context.addLog({ type: 'info', message: '📦 Installing dependencies...' });
+    }
+
     // Check for package-lock.json
     const hasLockFile = await window.electronAPI.fileExists(
       `${this.projectPath}/package-lock.json`
     );
 
-    if (this.context) {
-      this.context.setSetupStatus('installing');
-    }
-
-    // Use npm ci for faster install if lockfile exists
-    if (hasLockFile) {
-      const installer = new DependencyInstaller(this.projectPath, null, this.useSystemTerminal, this.shellType);
-      const result = await installer.installWithCI();
-      
-      if (!result.success) {
-        // Fallback to regular install
-        const fallbackResult = await installer.installWithInstall();
-        if (!fallbackResult.success) {
-          throw new Error('Failed to install dependencies');
-        }
-      }
-    } else {
-      // Install with progress tracking if we have dependencies list
-      if (this.context && this.context.dependencies && this.context.dependencies.length > 0) {
-        await this.installDependenciesWithProgress();
-      } else {
-        // Fallback to simple npm install
-        const installer = new DependencyInstaller(this.projectPath, null, this.useSystemTerminal, this.shellType);
-        const result = await installer.installWithInstall();
-        if (!result.success) {
-          throw new Error('Failed to install dependencies');
-        }
-      }
-    }
+    // Always use npm install for better compatibility
+    const command = 'install';
+    
+    // Run with app's terminal
+    const installId = `npm-${command}-${Date.now()}`;
+    await window.electronAPI.spawnCommand('npm', [command], this.projectPath, installId);
+    
+    // Wait for installation to complete (approximate)
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     if (this.context) {
+      this.context.addLog({ type: 'success', message: '✅ Dependencies installed successfully' });
       this.context.setSetupStatus('running');
     }
 
     // After installation, try to start the project
-    await this.startProject();
+    try {
+      await this.startProject();
+    } catch (error) {
+      if (this.context) {
+        this.context.addLog({ type: 'warning', message: `Could not auto-start: ${error.message}` });
+        this.context.setSetupStatus('completed');
+      }
+    }
 
     return { success: true };
   }
@@ -247,38 +489,35 @@ class SetupManager {
     if (!scripts.dev && scripts.start) {
       scriptName = 'start';
     } else if (!scripts.dev && !scripts.start) {
+      if (this.context) {
+        this.context.addLog({ type: 'warning', message: 'No start/dev script found in package.json' });
+      }
       throw new Error('No start/dev script found in package.json');
     }
 
-    // Run the script. For long-running start, spawn a non-blocking process so UI can continue.
-    if (this.useSystemTerminal) {
-      await window.electronAPI.runInTerminal(`npm run ${scriptName}`, this.projectPath, this.shellType);
-    } else {
-      // spawn so it doesn't block (we still receive streaming output via IPC)
-      const spawnRes = await window.electronAPI.spawnCommand('npm', ['run', scriptName], this.projectPath, `npm-start-${Date.now()}`);
-      if (spawnRes && spawnRes.success) {
-        // store process id in context for later control
-        if (this.context && this.context.setRunningProcessId) {
-          this.context.setRunningProcessId(spawnRes.id || spawnRes.pid);
-        }
+    if (this.context) {
+      this.context.addLog({ type: 'info', message: `🚀 Starting project (npm run ${scriptName})...` });
+    }
+
+    // Use app's terminal - spawn command for streaming output
+    const startId = `npm-start-${Date.now()}`;
+    const spawnRes = await window.electronAPI.spawnCommand('npm', ['run', scriptName], this.projectPath, startId);
+    
+    if (spawnRes && spawnRes.success) {
+      if (this.context && this.context.setRunningProcessId) {
+        this.context.setRunningProcessId(startId); // Use the ID, not PID
+      }
+      if (this.context) {
+        this.context.addLog({ type: 'info', message: `Process ID: ${startId} (Press Ctrl+C in terminal to stop)` });
       }
     }
 
-    // After starting, try to detect known frontend ports and confirm server availability
-    try {
-      const ports = (this.context && this.context.analysis && this.context.analysis.ports) || [];
-      for (const p of ports) {
-        const url = `http://localhost:${p}`;
-        const ok = await this.waitForUrl(url, 15000);
-        if (ok) {
-          if (this.context && this.context.setRunningServers) {
-            this.context.setRunningServers((prev) => ({ ...prev, frontend: url }));
-          }
-          break;
-        }
-      }
-    } catch (err) {
-      // ignore
+    // Wait for server to start and parse output for actual URL
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    if (this.context) {
+      this.context.addLog({ type: 'success', message: `✅ Server started! Check terminal output for the URL` });
+      this.context.setSetupStatus('completed');
     }
 
     return { success: true, script: scriptName };
@@ -286,32 +525,8 @@ class SetupManager {
 
   // Run with Docker
   async runWithDocker() {
-    if (this.useSystemTerminal) {
-      await window.electronAPI.runInTerminal('docker-compose up', this.projectPath, this.shellType);
-      return { success: true, mode: 'docker' };
-    }
-
-    const result = await window.electronAPI.runCommand(
-      'docker-compose',
-      ['up'],
-      this.projectPath,
-      'docker-compose-up'
-    );
-
-    if (!result.success) {
-      // Try with 'docker compose' (newer Docker Desktop)
-      const result2 = await window.electronAPI.runCommand(
-        'docker',
-        ['compose', 'up'],
-        this.projectPath,
-        'docker-compose-up-v2'
-      );
-
-      if (!result2.success) {
-        throw new Error('Failed to run docker-compose');
-      }
-    }
-
+    const dockerId = `docker-compose-${Date.now()}`;
+    await window.electronAPI.spawnCommand('docker-compose', ['up'], this.projectPath, dockerId);
     return { success: true, mode: 'docker' };
   }
 
@@ -454,25 +669,10 @@ class SetupManager {
   // Install single package with retry
   async installPackage(packageName, retries = this.retryCount) {
     try {
-      if (this.useSystemTerminal) {
-        await window.electronAPI.runInTerminal(`npm install ${packageName}`, this.projectPath, this.shellType);
-        return { success: true };
-      }
-
-      const result = await window.electronAPI.runCommand(
-        'npm',
-        ['install', packageName],
-        this.projectPath,
-        `install-${packageName}`
-      );
-
-      if (!result.success && retries > 0) {
-        // Wait before retry
-        await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
-        return await this.installPackage(packageName, retries - 1);
-      }
-
-      return result;
+      const installId = `install-${packageName}-${Date.now()}`;
+      await window.electronAPI.spawnCommand('npm', ['install', packageName], this.projectPath, installId);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return { success: true };
     } catch (error) {
       if (retries > 0) {
         await new Promise((resolve) => setTimeout(resolve, this.retryDelay));

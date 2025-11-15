@@ -28,4 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
   maximizeWindow: () => ipcRenderer.invoke('maximize-window'),
   closeWindow: () => ipcRenderer.invoke('close-window'),
+  // Editor integration
+  detectEditors: () => ipcRenderer.invoke('detect-editors'),
+  openInEditor: (editorCmd, projectPath) => ipcRenderer.invoke('open-in-editor', editorCmd, projectPath),
 });
